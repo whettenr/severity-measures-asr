@@ -1,1 +1,3 @@
 # severity-measures-asr
+
+The most common metric for evaluating Automatic Speech Recognition (ASR), Word Error Rate (WER), solely takes into account discrepancies in orthography. Although useful, studies have shown that this does not necessarily correlate well with performance or intelligibility. I seek to develop a systematic method to evaluate the quality or severity of mistakes made by ASR systems, in a health-care setting, using sentiment analysis and textual embeddings that overcomes the limitations of WER.
