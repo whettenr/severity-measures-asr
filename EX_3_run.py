@@ -386,13 +386,13 @@ def train(model, epochs, name='model'):
         train_wer, train_cos_loss, train_cos_dis = get_performance(model, train_dataset)
         val_wer, val_cos_loss, val_cos_dis = get_performance(model, validation_dataset)
         
-        hist['train_wer'] = train_wer
-        hist['train_cos_loss'] = train_cos_loss
-        hist['train_cos_dis'] = train_cos_dis
+        hist['train_wer'].append(train_wer)
+        hist['train_cos_loss'].append(train_cos_loss)
+        hist['train_cos_dis'].append(train_cos_dis)
         
-        hist['val_wer'] = val_wer
-        hist['val_cos_loss'] = val_cos_loss
-        hist['val_cos_dis'] = val_cos_dis
+        hist['val_wer'].append(val_wer)
+        hist['val_cos_loss'].append(val_cos_loss)
+        hist['val_cos_dis'].append(val_cos_dis)
         
         model.save_weights(name + '_weights_' + str(epoch))
         print('Time: ', time.time() - start_time)
@@ -411,6 +411,7 @@ def get_performance(model, data):
         cos_losses = []
         cos_distances = []
 
+        # for step, (X,y) in enumerate(tqdm(data)):
         for batch in tqdm(data):
             X, y = batch
 
