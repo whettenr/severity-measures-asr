@@ -428,8 +428,7 @@ def train(model, epochs, name='model'):
                 # Forward pass
                 y_pred = model(X)
                 loss = model.loss(y, y_pred)
-
-                hist['losses'].extend(loss.numpy().reshape(1, len(loss)).tolist()[0])
+                hist['losses'].extend(loss.reshape(1, len(loss)).tolist()[0])
 
             # Calculate gradients with respect to every trainable variable
             grad = tape.gradient(loss, model.trainable_variables)
