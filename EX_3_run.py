@@ -20,14 +20,23 @@ import sys
 import time
 from tqdm import tqdm
 import pickle
+import random
 
 import torch
-device = torch.device("cpu")
-print(device)
+# device = torch.device("cpu")
+# print(device)
 
 from sentence_transformers import SentenceTransformer, util
-minilm = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
 
+model_name = 'sentence-transformers/all-MiniLM-L6-v2'
+# model_name = 'sentence-transformers/all-distilroberta-v1'
+minilm = SentenceTransformer(model_name)
+# minilm = SentenceTransformer(model_name, device=device)
+
+seed = 1
+random.seed(seed)
+np.random.seed(seed)
+tf.random.set_seed(seed)
 
 # ## Data Prep
 # ### Load Data
@@ -178,6 +187,7 @@ def decode_batch_predictions(pred):
 # embeds and calculates cosine similarity
 # returns matrix of all cosine similaritys
 # between s and s1
+@torch.no_grad()
 def get_cos_sim(s, s1, model=minilm):
     embedding_s = model.encode(s, convert_to_tensor=True)
     embedding_s1 = model.encode(s1, convert_to_tensor=True)
@@ -185,22 +195,32 @@ def get_cos_sim(s, s1, model=minilm):
 
 
 # get the diagonals of the cosine matrix
+@torch.no_grad()
 def get_respective_cos_sim(s, s1, model=minilm):
     cos_sim = get_cos_sim(s, s1, model)
     return cos_sim.diagonal()
 
 # smoothing relu so that there will never be
 # log of negative number or 0
+@torch.no_grad()
 def relu(x):
     return torch.max(torch.tensor(0.0000001),x)
 
 # custom cosine loss
 # the negative log of the cosine similarity
+@torch.no_grad()
 def get_cos_loss(s, s1, model=minilm):
     cos_sim = get_respective_cos_sim(s, s1, model)
     # remove negatives and look at neg loglikilood
     cos_sim = relu(cos_sim).reshape((len(s),1))
     return -np.log(cos_sim.cpu()).numpy()
+    
+@torch.no_grad()
+def get_cos_distance(s, s1, model=minilm):
+    cos_sim = get_respective_cos_sim(s, s1, model)
+    # remove negatives and look at neg loglikilood
+    cos_sim = relu(cos_sim).reshape((len(s),1))
+    return 1 - cos_sim.cpu().numpy()
 
 # decodes set of label
 def get_labels(y):
@@ -217,6 +237,7 @@ def get_labels(y):
 
 
 # Normal CTCLoss function
+@torch.no_grad()
 def CTCLoss(y_true, y_pred):
     # Compute the training-time loss value
     batch_len = tf.cast(tf.shape(y_true)[0], dtype="int64")
@@ -232,7 +253,7 @@ def CTCLoss(y_true, y_pred):
 
 # In[14]:
 
-
+@torch.no_grad()
 def CTC_Cosine_Loss(y_true, y_pred):
     # Compute the training-time loss value
     batch_len = tf.cast(tf.shape(y_true)[0], dtype="int64")
@@ -251,7 +272,8 @@ def CTC_Cosine_Loss(y_true, y_pred):
     # print(cos_loss)
     return loss + cos_loss
 
-def Cosine_Loss(y_true, y_pred):
+@torch.no_grad()
+def CTC001_Cosine_Loss(y_true, y_pred):
     # Compute the training-time loss value
     batch_len = tf.cast(tf.shape(y_true)[0], dtype="int64")
     input_length = tf.cast(tf.shape(y_pred)[1], dtype="int64")
@@ -265,11 +287,11 @@ def Cosine_Loss(y_true, y_pred):
     y_pred_labs = decode_batch_predictions(y_pred)
     # print(y_pred_labs)
     cos_loss = get_cos_loss(y_true_labs, y_pred_labs)
-    # loss = keras.backend.ctc_batch_cost(y_true, y_pred, input_length, label_length)
+    loss = keras.backend.ctc_batch_cost(y_true, y_pred, input_length, label_length)
     # print(cos_loss)
-    return cos_loss
+    return (0.001 *loss) + cos_loss
 
-
+@torch.no_grad()
 def CTC_Cosine2_Loss(y_true, y_pred):
     # Compute the training-time loss value
     batch_len = tf.cast(tf.shape(y_true)[0], dtype="int64")
@@ -287,6 +309,28 @@ def CTC_Cosine2_Loss(y_true, y_pred):
     loss = keras.backend.ctc_batch_cost(y_true, y_pred, input_length, label_length)
     # print(cos_loss)
     return loss + tf.math.square(cos_loss)
+
+
+
+
+@torch.no_grad()
+def CTC_by_Cosine_Dist(y_true, y_pred):
+    # Compute the training-time loss value
+    batch_len = tf.cast(tf.shape(y_true)[0], dtype="int64")
+    input_length = tf.cast(tf.shape(y_pred)[1], dtype="int64")
+    label_length = tf.cast(tf.shape(y_true)[1], dtype="int64")
+
+    input_length = input_length * tf.ones(shape=(batch_len, 1), dtype="int64")
+    label_length = label_length * tf.ones(shape=(batch_len, 1), dtype="int64")
+
+    y_true_labs = get_labels(y_true)
+    # print(y_true_labs)
+    y_pred_labs = decode_batch_predictions(y_pred)
+    # print(y_pred_labs)
+    cos_distance = get_cos_distance(y_true_labs, y_pred_labs)
+    loss = keras.backend.ctc_batch_cost(y_true, y_pred, input_length, label_length)
+    # print(cos_loss)
+    return loss * cos_distance
 
 # ## Model
 
@@ -358,14 +402,16 @@ def build_model(input_dim, output_dim, rnn_layers=5, rnn_units=128, loss=CTCLoss
 
 
 
+
 # In[16]:
+rnnu = 512
 
 if sys.argv[1] == 'base':
 
     model = build_model(
         input_dim=fft_length // 2 + 1,
         output_dim=char_to_num.vocabulary_size(),
-        rnn_units=128,
+        rnn_units=rnnu,
         loss=CTCLoss,
     )
 
@@ -374,17 +420,17 @@ elif sys.argv[1] == 'cos':
     model = build_model(
         input_dim=fft_length // 2 + 1,
         output_dim=char_to_num.vocabulary_size(),
-        rnn_units=128,
+        rnn_units=rnnu,
         loss=CTC_Cosine_Loss,
     )
 
-elif sys.argv[1] == 'onlycos':
+elif sys.argv[1] == 'ctc001':
     
     model = build_model(
         input_dim=fft_length // 2 + 1,
         output_dim=char_to_num.vocabulary_size(),
-        rnn_units=128,
-        loss=Cosine_Loss,
+        rnn_units=rnnu,
+        loss=CTC001_Cosine_Loss,
     )
 
 elif sys.argv[1] == 'cossquared':
@@ -392,9 +438,19 @@ elif sys.argv[1] == 'cossquared':
     model = build_model(
         input_dim=fft_length // 2 + 1,
         output_dim=char_to_num.vocabulary_size(),
-        rnn_units=128,
+        rnn_units=rnnu,
         loss=CTC_Cosine2_Loss,
     )
+
+elif sys.argv[1] == 'ctcbycos':
+    
+    model = build_model(
+        input_dim=fft_length // 2 + 1,
+        output_dim=char_to_num.vocabulary_size(),
+        rnn_units=rnnu,
+        loss=CTC_by_Cosine_Dist,
+    )
+    
 
 else:
     print('put either base or cos as arguments')
@@ -405,21 +461,22 @@ model.summary()
 
 # In[34]:
 
+# model.load_weights('model_base_weights_39')
 
 def train(model, epochs, name='model'):
     hist = {
         'losses': [],
         
         'train_wer': [],
-        'train_cos_loss': [],
+        # 'train_cos_loss': [],
         'train_cos_dis': [],
         
         'val_wer': [],        
-        'val_cos_loss': [],
+        # 'val_cos_loss': [],
         'val_cos_dis': []
     }
     
-    for epoch in tqdm(range(epochs)):
+    for epoch in tqdm(range(50)):
         print("\nStart of epoch %d" % (epoch,))
         start_time = time.time()
         
@@ -438,18 +495,20 @@ def train(model, epochs, name='model'):
             if step % 200 == 0:
                 print('avg. loss at step: ', step, ' = ', loss.numpy().mean())
         
-        train_wer, train_cos_loss, train_cos_dis = get_performance(model, train_dataset)
-        val_wer, val_cos_loss, val_cos_dis = get_performance(model, validation_dataset)
+        
+        train_wer, train_cos_dis = get_performance(model, train_dataset)
+        val_wer, val_cos_dis = get_performance(model, validation_dataset)
         
         hist['train_wer'].append(train_wer)
-        hist['train_cos_loss'].append(train_cos_loss)
+        # hist['train_cos_loss'].append(train_cos_loss)
         hist['train_cos_dis'].append(train_cos_dis)
         
         hist['val_wer'].append(val_wer)
-        hist['val_cos_loss'].append(val_cos_loss)
+        # hist['val_cos_loss'].append(val_cos_loss)
         hist['val_cos_dis'].append(val_cos_dis)
         
-        model.save_weights(name + '_weights_' + str(epoch))
+        if epoch % 3 == 0:
+            model.save_weights(name + '_weights_' + str(epoch))
         print('Time: ', time.time() - start_time)
     return hist
 
@@ -457,7 +516,7 @@ def train(model, epochs, name='model'):
 
 # In[35]:
 
-
+@torch.no_grad()
 def get_performance(model, data):
     with torch.no_grad():
         print('getting performance')
@@ -482,29 +541,29 @@ def get_performance(model, data):
             targets.extend(temp_target)
         
             # get cosine loss
-            cos_losses.extend(get_cos_loss(temp_target, batch_predictions).reshape(1, len(temp_target)).tolist()[0])
-            torch.cuda.empty_cache()
+            # cos_losses.extend(get_cos_loss(temp_target, batch_predictions).reshape(1, len(temp_target)).tolist()[0])
+            # torch.cuda.empty_cache()
             # get average cosine distance (1 - cos(x,y))
             cos_distances.extend((1 - get_respective_cos_sim(temp_target, batch_predictions)).tolist())        
             torch.cuda.empty_cache()
 
-    # get metrics
-    wer_score = wer(targets, predictions)
-    avg_cos_loss = np.mean(cos_losses)
-    avg_cos_distance = np.mean(cos_distances)
-    
-    print("-" * 100)
-    print(f"Word Error Rate: {wer_score:.4f}")
-    print(f"Avg. Cos Loss: {avg_cos_loss:.4f}")
-    print(f"Avg. Cos Distance: {avg_cos_distance:.4f}")
-    print("-" * 100)
-    for i in np.random.randint(0, len(predictions), 2):
-        print(f"Target    : {targets[i]}")
-        print(f"Prediction: {predictions[i]}")
-        print(f"Word Error Rate For Example: {wer(targets[i], predictions[i]):.4f}")
-        print(f"Cos Dis: {1 - get_cos_sim(targets[i], predictions[i]).item():.4f}")
+        # get metrics
+        wer_score = wer(targets, predictions)
+        # avg_cos_loss = np.mean(cos_losses)
+        avg_cos_distance = np.mean(cos_distances)
+
         print("-" * 100)
-    return wer_score, avg_cos_loss, avg_cos_distance
+        print(f"Word Error Rate: {wer_score:.4f}")
+        # print(f"Avg. Cos Loss: {avg_cos_loss:.4f}")
+        print(f"Avg. Cos Distance: {avg_cos_distance:.4f}")
+        print("-" * 100)
+        for i in np.random.randint(0, len(predictions), 2):
+            print(f"Target    : {targets[i]}")
+            print(f"Prediction: {predictions[i]}")
+            print(f"Word Error Rate For Example: {wer(targets[i], predictions[i]):.4f}")
+            print(f"Cos Dis: {1 - get_cos_sim(targets[i], predictions[i]).item():.4f}")
+            print("-" * 100)
+    return wer_score, avg_cos_distance
 
 # In[136]:
 
@@ -515,7 +574,7 @@ history_data = train(model, epochs=50, name='model_'+ sys.argv[1])
 # In[ ]:
 
 
-with open('history_'+ sys.argv[1] +'.pkl', 'wb') as handle:
+with open('history_' + str(rnnu) + '_'+ sys.argv[1] +'.pkl', 'wb') as handle:
     pickle.dump(history_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
