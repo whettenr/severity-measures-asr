@@ -33,7 +33,7 @@ model_name = 'sentence-transformers/all-MiniLM-L6-v2'
 minilm = SentenceTransformer(model_name)
 # minilm = SentenceTransformer(model_name, device=device)
 
-seed = 1
+seed = 2
 random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
@@ -574,7 +574,7 @@ history_data = train(model, epochs=50, name='model_'+ sys.argv[1])
 # In[ ]:
 
 
-with open('history_' + str(rnnu) + '_'+ sys.argv[1] +'.pkl', 'wb') as handle:
+with open('history_' + str(rnnu) + '_'+ sys.argv[1] +'_seed2.pkl', 'wb') as handle:
     pickle.dump(history_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
